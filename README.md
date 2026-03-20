@@ -6,7 +6,7 @@ Este projeto apresenta um pipeline de dados **Serverless na AWS** para extraçã
 * Gabriel Leite (Owner)
 * Raquel Miranda
 * Carlos Henrique Neves Júnior
-* bruno Bento
+* Bruno Bento
 * Victor Hugo
 ---
 
