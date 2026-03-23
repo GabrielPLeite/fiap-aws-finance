@@ -17,9 +17,9 @@ Este projeto apresenta um pipeline de dados **Serverless na AWS** para extraçã
 yfinance → S3 RAW (Parquet) → AWS Lambda → AWS Glue (PySpark) → S3 REFINED (Parquet) → Amazon Athena
 ```
 
-* **Ingestão:** Script Python (`src/ingestion/extrair_dados.py`) utilizando `yfinance`, rodando no CloudShell ou localmente, salvando em **Amazon S3 (camada RAW)** em formato Parquet particionado por data.
+* **Ingestão:** Script Python (`src/ingestion/extrair_dados.py`) utilizando `yfinance`, rodando no CloudShell ou localmente, salvando em **Amazon S3 (camada RAW)** em formato Parquet com path `raw/dt={YYYY-MM-DD}/ticker=PETR4.SA/dados.parquet`.
 * **Automação:** Função **AWS Lambda** (`src/lambda/lambda_function.py`) disparada por eventos S3, que inicia automaticamente o Glue Job ao detectar novos arquivos Parquet na camada RAW.
-* **Processamento:** Job **AWS Glue PySpark** (`src/glue/job_spark_etl.py`) para limpeza de colunas, conversão de tipos e cálculo de **Média Móvel de 3 dias**, salvando na camada REFINED.
+* **Processamento:** Job **AWS Glue PySpark** (`src/glue/job_spark_etl.py`) — limpeza de colunas, conversão de tipos e cálculo de **Média Móvel de 3 dias**, salvando na camada REFINED. ⚠️ **A lógica PySpark ETL ainda precisa ser implementada** neste arquivo (atualmente contém um script de extração como placeholder).
 * **Consulta:** **Amazon Athena** com tabela externa criada via DDL (`src/sql/athena_table.sql`) sobre os dados processados.
 
 ---
@@ -36,7 +36,7 @@ fiap-aws-finance/
 │   ├── lambda/
 │   │   └── lambda_function.py     # Lambda: dispara o Glue Job via eventos S3
 │   ├── glue/
-│   │   └── job_spark_etl.py       # ETL PySpark: limpeza + média móvel → S3 REFINED
+│   │   └── job_spark_etl.py       # ETL PySpark (stub): lógica ainda a implementar
 │   ├── sql/
 │   │   └── athena_table.sql       # DDL da tabela externa no Athena
 │   └── scraping/
@@ -59,7 +59,7 @@ fiap-aws-finance/
 
 * **Linguagens:** Python 3.x, PySpark, SQL
 * **AWS Services:** S3, Glue, Lambda, Athena, IAM, CloudWatch
-* **Bibliotecas:** `yfinance`, `pandas`, `pyarrow`, `boto3`, `requests`, `beautifulsoup4`
+* **Bibliotecas:** `yfinance`, `pandas`, `pyarrow`, `boto3`, `requests`, `beautifulsoup4`, `lxml`
 
 ---
 
@@ -91,9 +91,21 @@ No AWS Glue Studio, crie um Job Spark e utilize o código em `src/glue/job_spark
 
 O job recebe os argumentos `--source_bucket` e `--source_keys`, que são passados automaticamente pela Lambda.
 
+> ⚠️ **Atenção:** `src/glue/job_spark_etl.py` atualmente contém um script de extração como placeholder. A lógica PySpark ETL (renomeação de colunas RAW → REFINED, conversão de tipos e cálculo de `media_movel_3_dias` com window function) ainda precisa ser implementada.
+
 ### 3. Consulta (Amazon Athena)
 
-Execute o DDL em `src/sql/athena_table.sql` no Athena para registrar a tabela externa sobre a camada REFINED:
+Execute os seguintes passos no editor do Athena:
+
+1. Crie o banco de dados (se ainda não existir):
+
+```sql
+CREATE DATABASE IF NOT EXISTS fiap_finance;
+```
+
+2. Execute o DDL em `src/sql/athena_table.sql` para registrar a tabela externa sobre a camada REFINED.
+
+3. Consulte os dados:
 
 ```sql
 SELECT * FROM fiap_finance.bovespa_refined ORDER BY date DESC LIMIT 20;
@@ -102,9 +114,11 @@ SELECT * FROM fiap_finance.bovespa_refined ORDER BY date DESC LIMIT 20;
 ### 4. Scraping Fundamentus (opcional)
 
 ```bash
-python src/scraping/scp_acoes.py   # → data/raw/fundamentus_acoes.csv
-python src/scraping/scp_fii.py     # → data/raw/fundamentus_fii.csv
+python src/scraping/scp_acoes.py   # → fundamentus.csv (diretório atual)
+python src/scraping/scp_fii.py     # → fundamentus_fii.csv (diretório atual)
 ```
+
+> Os arquivos são salvos no diretório de execução. Mova-os manualmente para `data/raw/` se necessário.
 
 ---
 
