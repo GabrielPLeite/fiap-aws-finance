@@ -19,8 +19,8 @@ yfinance → S3 RAW (Parquet) → AWS Lambda → AWS Glue (PySpark) → S3 REFIN
 
 * **Ingestão:** Script Python (`src/ingestion/extrair_dados.py`) utilizando `yfinance`, rodando no CloudShell ou localmente, salvando em **Amazon S3 (camada RAW)** em formato Parquet com path `raw/dt={YYYY-MM-DD}/ticker=PETR4.SA/dados.parquet`.
 * **Automação:** Função **AWS Lambda** (`src/lambda/lambda_function.py`) disparada por eventos S3, que inicia automaticamente o Glue Job ao detectar novos arquivos Parquet na camada RAW.
-* **Processamento:** Job **AWS Glue PySpark** (`src/glue/job_spark_etl.py`) — limpeza de colunas, conversão de tipos e cálculo de **Média Móvel de 3 dias**, salvando na camada REFINED. ⚠️ **A lógica PySpark ETL ainda precisa ser implementada** neste arquivo (atualmente contém um script de extração como placeholder).
-* **Consulta:** **Amazon Athena** com tabela externa criada via DDL (`src/sql/athena_table.sql`) sobre os dados processados.
+* **Processamento:** Job **AWS Glue PySpark** (`src/glue/tech-challenge-fase2-fiap.py`) — limpeza de colunas, conversão de tipos, agregações e análise temporal (médias móveis, delta diário, histórico) com window functions, salvando três tabelas na camada REFINED.
+* **Consulta:** **Amazon Athena** com tabela externa criada via DDL (`src/athena/athena_table.sql`) sobre os dados processados.
 
 ---
 
@@ -36,8 +36,8 @@ fiap-aws-finance/
 │   ├── lambda/
 │   │   └── lambda_function.py     # Lambda: dispara o Glue Job via eventos S3
 │   ├── glue/
-│   │   └── job_spark_etl.py       # ETL PySpark (stub): lógica ainda a implementar
-│   ├── sql/
+│   │   └── tech-challenge-fase2-fiap.py  # ETL PySpark: agregações, renomeações e análise temporal
+│   ├── athena/
 │   │   └── athena_table.sql       # DDL da tabela externa no Athena
 │   └── scraping/
 │       ├── scp_acoes.py           # Scraper de ações (Fundamentus)
@@ -87,11 +87,9 @@ python src/ingestion/extrair_dados.py
 
 ### 2. ETL (AWS Glue)
 
-No AWS Glue Studio, crie um Job Spark e utilize o código em `src/glue/job_spark_etl.py`.
+No AWS Glue Studio, crie um Job Spark e utilize o código em `src/glue/tech-challenge-fase2-fiap.py`.
 
 O job recebe os argumentos `--source_bucket` e `--source_keys`, que são passados automaticamente pela Lambda.
-
-> ⚠️ **Atenção:** `src/glue/job_spark_etl.py` atualmente contém um script de extração como placeholder. A lógica PySpark ETL (renomeação de colunas RAW → REFINED, conversão de tipos e cálculo de `media_movel_3_dias` com window function) ainda precisa ser implementada.
 
 ### 3. Consulta (Amazon Athena)
 
@@ -103,7 +101,7 @@ Execute os seguintes passos no editor do Athena:
 CREATE DATABASE IF NOT EXISTS fiap_finance;
 ```
 
-2. Execute o DDL em `src/sql/athena_table.sql` para registrar a tabela externa sobre a camada REFINED.
+2. Execute o DDL em `src/athena/athena_table.sql` para registrar a tabela externa sobre a camada REFINED.
 
 3. Consulte os dados:
 
