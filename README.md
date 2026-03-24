@@ -1,6 +1,6 @@
 # Tech Challenge - Fase 2: Pipeline de Dados Bovespa (FIAP)
 
-Este projeto apresenta um pipeline de dados **Serverless na AWS** para extração, tratamento e análise de dados históricos da B3 (PETR4.SA). O objetivo é automatizar o fluxo de dados desde a captura bruta até a geração de indicadores de negócio, como a **Média Móvel de 3 dias**.
+Este projeto apresenta um pipeline de dados **Serverless na AWS** para extração, tratamento e análise de dados de **Fundos de Investimento Imobiliário (FIIs)** via web scraping do Fundamentus. O objetivo é automatizar o fluxo de dados desde a captura bruta até a geração de indicadores de negócio, como **médias móveis, variações diárias e histórico por papel**.
 
 ### Integrantes:
 * Gabriel Leite (Owner)
@@ -14,13 +14,13 @@ Este projeto apresenta um pipeline de dados **Serverless na AWS** para extraçã
 ## Arquitetura
 
 ```
-yfinance → S3 RAW (Parquet) → AWS Lambda → AWS Glue (PySpark) → S3 REFINED (Parquet) → Amazon Athena
+Fundamentus (web scraping) → S3 RAW (Parquet) → Glue Catalog → AWS Lambda → AWS Glue (PySpark) → S3 REFINED (Parquet) → Amazon Athena
 ```
 
-* **Ingestão:** Script Python (`src/ingestion/extrair_dados.py`) utilizando `yfinance`, rodando no CloudShell ou localmente, salvando em **Amazon S3 (camada RAW)** em formato Parquet com path `raw/dt={YYYY-MM-DD}/ticker=PETR4.SA/dados.parquet`.
+* **Ingestão:** Script Python (`src/ingestion/extrair_dados.py`) realizando web scraping do **Fundamentus FII**, salvando em **Amazon S3 (camada RAW)** em formato Parquet com path `Projetos/job_finance/inputs/dt={YYYY-MM-DD}/fundamentus_fii.parquet`.
 * **Automação:** Função **AWS Lambda** (`src/lambda/lambda_function.py`) disparada por eventos S3, que inicia automaticamente o Glue Job ao detectar novos arquivos Parquet na camada RAW.
-* **Processamento:** Job **AWS Glue PySpark** (`src/glue/tech-challenge-fase2-fiap.py`) — limpeza de colunas, conversão de tipos, agregações e análise temporal (médias móveis, delta diário, histórico) com window functions, salvando três tabelas na camada REFINED.
-* **Consulta:** **Amazon Athena** com tabela externa criada via DDL (`src/athena/athena_table.sql`) sobre os dados processados.
+* **Processamento:** Job **AWS Glue PySpark** (`src/glue/tech-challenge-fase2-fiap.py`) — lê da tabela catalogada `job_finance.fundamentus_fii` no Glue Catalog, aplica limpeza de tipos, agregações e análise temporal (média móvel 7 períodos, delta diário, histórico por papel) com window functions, salvando três tabelas na camada REFINED.
+* **Consulta:** **Amazon Athena** com tabelas externas sobre os dados processados no banco `job_finance`.
 
 ---
 
@@ -32,13 +32,13 @@ fiap-aws-finance/
 ├── requirements.txt
 ├── src/
 │   ├── ingestion/
-│   │   └── extrair_dados.py       # Extrai dados da PETR4.SA e envia ao S3 RAW
+│   │   └── extrair_dados.py       # Scraping Fundamentus FII e upload ao S3 RAW
 │   ├── lambda/
 │   │   └── lambda_function.py     # Lambda: dispara o Glue Job via eventos S3
 │   ├── glue/
 │   │   └── tech-challenge-fase2-fiap.py  # ETL PySpark: agregações, renomeações e análise temporal
 │   ├── athena/
-│   │   └── athena_table.sql       # DDL da tabela externa no Athena
+│   │   └── athena_table.sql       # DDL de referência para tabela externa no Athena
 │   └── scraping/
 │       ├── scp_acoes.py           # Scraper de ações (Fundamentus)
 │       └── scp_fii.py             # Scraper de FIIs (Fundamentus)
@@ -59,7 +59,7 @@ fiap-aws-finance/
 
 * **Linguagens:** Python 3.x, PySpark, SQL
 * **AWS Services:** S3, Glue, Lambda, Athena, IAM, CloudWatch
-* **Bibliotecas:** `yfinance`, `pandas`, `pyarrow`, `boto3`, `requests`, `beautifulsoup4`, `lxml`
+* **Bibliotecas:** `pandas`, `pyarrow`, `boto3`, `requests`, `beautifulsoup4`, `lxml`
 
 ---
 
@@ -79,7 +79,7 @@ aws configure
 
 ### 1. Ingestão de Dados
 
-Execute localmente ou no AWS CloudShell para extrair dados da PETR4.SA e enviar ao S3:
+Execute localmente ou no AWS CloudShell para extrair dados de FIIs do Fundamentus e enviar ao S3 RAW:
 
 ```bash
 python src/ingestion/extrair_dados.py
@@ -89,7 +89,7 @@ python src/ingestion/extrair_dados.py
 
 No AWS Glue Studio, crie um Job Spark e utilize o código em `src/glue/tech-challenge-fase2-fiap.py`.
 
-O job recebe os argumentos `--source_bucket` e `--source_keys`, que são passados automaticamente pela Lambda.
+O job lê da tabela catalogada `job_finance.fundamentus_fii` no Glue Catalog e requer apenas o argumento padrão `--JOB_NAME`. As três tabelas de saída são registradas automaticamente no Glue Catalog.
 
 ### 3. Consulta (Amazon Athena)
 
@@ -98,15 +98,20 @@ Execute os seguintes passos no editor do Athena:
 1. Crie o banco de dados (se ainda não existir):
 
 ```sql
-CREATE DATABASE IF NOT EXISTS fiap_finance;
+CREATE DATABASE IF NOT EXISTS job_finance;
 ```
 
-2. Execute o DDL em `src/athena/athena_table.sql` para registrar a tabela externa sobre a camada REFINED.
-
-3. Consulte os dados:
+2. Consulte as tabelas geradas pelo Glue Job:
 
 ```sql
-SELECT * FROM fiap_finance.bovespa_refined ORDER BY date DESC LIMIT 20;
+-- Agregações por papel/segmento
+SELECT * FROM job_finance.fundamentus_fii_req5a_agrupado ORDER BY dt DESC LIMIT 20;
+
+-- Dados com colunas renomeadas (cotacao → preco_cota, liquidez → liquidez_diaria)
+SELECT * FROM job_finance.fundamentus_fii_req5b_renomeado LIMIT 20;
+
+-- Análise temporal com médias móveis e variações
+SELECT * FROM job_finance.fundamentus_fii_req5c_temporal ORDER BY dt DESC LIMIT 20;
 ```
 
 ### 4. Scraping Fundamentus (opcional)
@@ -126,25 +131,67 @@ python src/scraping/scp_fii.py     # → fundamentus_fii.csv (diretório atual)
 
 | Coluna | Descrição |
 |--------|-----------|
-| `data_pregao` | Data do pregão |
-| `preco_fechamento` | Preço de fechamento |
-| `high_petr4_sa` | Máxima do dia |
-| `low_petr4_sa` | Mínima do dia |
-| `open_petr4_sa` | Abertura |
-| `volume_negociado` | Volume negociado |
+| `Papel` | Código do FII |
+| `Segmento` | Segmento do FII |
+| `Cotacao` | Cotação atual |
+| `FFO_Yield` | FFO Yield |
+| `Dividend_Yield` | Dividend Yield |
+| `PVP` | Preço sobre Valor Patrimonial |
+| `Valor_de_Mercado` | Valor de mercado total |
+| `Liquidez` | Liquidez diária |
+| `Qtd_de_Imoveis` | Quantidade de imóveis |
+| `Preco_m2` | Preço por m² |
+| `Aluguel_m2` | Aluguel por m² |
+| `Cap_Rate` | Cap Rate |
+| `Vacancia_Media` | Vacância média |
+| `data_ingestao` | Data de ingestão |
+| `timestamp_ingestao` | Timestamp de ingestão |
+| `fonte` | Fonte dos dados (`fundamentus`) |
 
-**REFINED** (Athena `bovespa_refined`):
+**REFINED** — tabelas geradas pelo Glue Job no banco `job_finance`:
+
+**`fundamentus_fii_req5a_agrupado`** — Agregações por dt/papel/segmento:
 
 | Coluna | Descrição |
 |--------|-----------|
-| `date` | Data do pregão |
-| `close` | Preço de fechamento |
-| `high` | Máxima |
-| `low` | Mínima |
-| `open` | Abertura |
-| `volume` | Volume |
-| `media_movel_3_dias` | Média móvel de 3 dias |
-| `data_processamento` | Timestamp do processamento |
+| `dt` | Data de referência |
+| `papel` | Código do FII |
+| `segmento` | Segmento |
+| `qtd_registros` | Contagem de registros |
+| `cotacao_media` | Cotação média |
+| `valor_mercado_total` | Soma do valor de mercado |
+| `ffo_yield_medio` | FFO Yield médio |
+| `dividend_yield_medio` | Dividend Yield médio |
+| `pvp_medio` | PVP médio |
+| `liquidez_total` | Liquidez total |
+| `cap_rate_medio` | Cap Rate médio |
+| `vacancia_media_max` | Vacância máxima |
+| `preco_m2_medio` | Preço m² médio |
+| `aluguel_m2_medio` | Aluguel m² médio |
+
+**`fundamentus_fii_req5b_renomeado`** — Dados com colunas renomeadas:
+
+| Coluna | Descrição |
+|--------|-----------|
+| `preco_cota` | Cotação (renomeada de `cotacao`) |
+| `liquidez_diaria` | Liquidez (renomeada de `liquidez`) |
+| _(demais colunas inalteradas)_ | |
+
+**`fundamentus_fii_req5c_temporal`** — Análise temporal com window functions:
+
+| Coluna | Descrição |
+|--------|-----------|
+| `dt` | Data de referência |
+| `papel` | Código do FII |
+| `segmento` | Segmento |
+| `cotacao_media_dia` | Cotação média do dia |
+| `valor_mercado_total_dia` | Valor de mercado total do dia |
+| `dividend_yield_medio_dia` | Dividend Yield médio do dia |
+| `media_movel_7d_cotacao` | Média móvel de 7 períodos por papel |
+| `diferenca_vs_dia_anterior` | Delta em relação ao dia anterior |
+| `cotacao_max_periodo` | Máxima histórica por papel |
+| `cotacao_min_periodo` | Mínima histórica por papel |
+| `dias_desde_primeiro_registro` | Dias desde o primeiro registro |
 
 ---
 
